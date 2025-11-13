@@ -1,0 +1,147 @@
+{
+  "id": "mentalhealthforum",
+  "realm": "mentalhealthforum",
+  "enabled": true,
+
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": false,
+  "editUsernameAllowed": false,
+  "rememberMe": true,
+  "loginWithEmailAllowed": true,
+  "verifyEmail": true,
+  "resetPasswordAllowed": true,
+  "sslRequired": "external",
+
+  "bruteForceProtected": true,
+  "maxFailureWaitSeconds": 900,
+  "minimumQuickLoginWaitSeconds": 60,
+  "failureFactor": 5,
+  "permanentLockout": false,
+  "quickLoginCheckMilliSeconds": 1000,
+  "passwordPolicy": "length(8) and digits(1) and upperCase(1) and lowerCase(1) and specialChars(1)",
+
+  "accessTokenLifespan": 1800,
+  "ssoSessionIdleTimeout": 18000,
+  "ssoSessionMaxLifespan": 2592000,
+  "offlineSessionIdleTimeout": 2592000,
+  "offlineSessionMaxLifespanEnabled": true,
+  "offlineSessionMaxLifespan": 5184000,
+  "revokeRefreshToken": true,
+
+  "internationalizationEnabled": true,
+  "supportedLocales": ["en", "es", "fr", "de"],
+  "defaultLocale": "en",
+
+  "loginTheme": "keycloak",
+  "accountTheme": "keycloak.v2",
+  "adminTheme": "keycloak.v2",
+  "emailTheme": "keycloak.v2",
+
+  "clients": [
+    {
+      "clientId": "mhf-frontend",
+      "name": "Mental Health Forum Web (SPA)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "redirectUris": [
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000"
+      ]
+    },
+
+    {
+      "clientId": "mhf-backend",
+      "name": "MHF Spring Boot Backend (Confidential)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true,
+      "secret": "${MHF_BACKEND_SECRET}",
+      "redirectUris": [
+        "http://localhost:8080/*"
+      ],
+      "webOrigins": [
+        "http://localhost:8080"
+      ]
+    },
+
+    {
+      "clientId": "mhf-api",
+      "name": "MHF Protected API (Bearer-Only)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": true
+    }
+  ],
+
+  "roles": {
+    "realm": [
+      {"name":  "forum_member", "description": "Basic forum access"},
+      {"name":  "trusted_member",
+        "description": "Trusted community member with additional privileges"
+      },
+      {"name":  "peer_supporter",
+        "description": "Can provide peer support"
+      },
+      {"name":  "moderator", "description":  "Content moderation capabilities"},
+      {"name":  "admin", "description":  "Full administrative access"}
+    ]
+  },
+
+  "groups": [
+    {
+      "name": "members",
+      "subGroups": [
+        {"name": "new", "realmRoles": ["forum_member"]},
+        {"name": "active", "realmRoles": ["forum_member", "trusted_member"]},
+        {"name": "trusted", "realmRoles": ["forum_member", "trusted_member", "peer_supporter"]}
+      ]
+    },
+
+    {
+      "name": "moderators",
+      "subGroups": [
+        {"name": "peer", "realmRoles": ["forum_member", "moderator"]},
+        {"name": "professional", "realmRoles": ["forum_member", "peer_supporter", "moderator"]}
+      ]
+    },
+
+    {
+      "name": "administrators",
+      "realmRoles": ["admin"]
+    }
+  ],
+
+  "defaultGroups": ["/members/new"],
+
+  "attributes": {
+    "userProfileEnabled": true,
+    "frontendBaseUrl": "http://localhost:3000"
+  },
+
+  "eventsEnabled": true,
+  "eventsListeners": ["jboss-logging", "event-logger"],
+  "enabledEventTypes": [
+    "LOGIN",
+    "LOGIN_ERROR",
+    "REGISTER",
+    "LOGOUT",
+    "UPDATE_PROFILE",
+    "DELETE_ACCOUNT",
+    "RESET_PASSWORD"
+  ],
+
+  "eventsExpiration": 1209600
+}

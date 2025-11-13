@@ -1,0 +1,121 @@
+services:
+  # ----------------------------------------------------
+  # 1. KEYCLOAK SERVICE
+  # ----------------------------------------------------
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4.2
+    container_name: mhf-keycloak
+    command: start-dev --import-realm
+    ports:
+      - "9080:8080"
+    environment:
+      KEYCLOAK_ADMIN: mhf-temp-admin
+      KEYCLOAK_ADMIN_PASSWORD: mhf-temp-password
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: keycloak_user
+      KC_DB_PASSWORD: keycloak_password
+
+      KC_HEALTH_ENABLED: true
+      KC_HOSTNAME_URL: http://localhost:9080
+      KC_HTTP_ENABLED: true
+      KC_PROXY: edge
+
+    volumes:
+      # Mounts declarative configuration file
+      - ./keycloak/mentalhealthforum-realm.json:/opt/keycloak/data/import/mentalhealthforum-realm.json
+      - ./keycloak/themes:/opt/keycloak/themes
+
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+
+    restart: always
+
+  # ----------------------------------------------------
+  # 2. KEYCLOAK POSTGRES DATABASE
+  # ----------------------------------------------------
+  keycloak-db:
+    image: postgres:16-alpine
+    container_name: mhf-keycloak-db
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak_user
+      POSTGRES_PASSWORD: keycloak_password
+
+    volumes:
+      - ./databases/keycloak-db:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak_user -d keycloak"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+    restart: always
+
+  # ----------------------------------------------------
+  # 3. FORUM POSTGRES DATABASE (For Spring Boot Data)
+  # ----------------------------------------------------
+  forum-db:
+    image: postgres:16-alpine
+    container_name: mhf-forum-db
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: forum
+      POSTGRES_USER: forum_user
+      POSTGRES_PASSWORD: forum_password
+
+    volumes:
+      - ./databases/forum-db/data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U forum_user -d forum"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+    restart: always
+
+  # ----------------------------------------------------
+  # 4. PGADMIN
+  # ----------------------------------------------------
+  pgadmin:
+    image: dpage/pgadmin4:8
+    container_name: mhf-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@mhf.co
+      PGADMIN_DEFAULT_PASSWORD: admin123
+
+    ports:
+      - "5050:80"
+    depends_on:
+      - keycloak-db
+      - forum-db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    restart: always
+
+# ----------------------------------------------------
+# NETWORK CONFIGURATION
+# ----------------------------------------------------
+networks:
+  default:
+    name: mhf-network
+    driver: bridge
+
+
+
+
+
+
+
+
+
