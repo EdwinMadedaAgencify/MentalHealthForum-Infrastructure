@@ -63,7 +63,7 @@ services:
     image: postgres:16-alpine
     container_name: mhf-forum-db
     ports:
-      - "5432:5432"
+      - "5434:5432"
     environment:
       POSTGRES_DB: forum
       POSTGRES_USER: forum_user
@@ -71,6 +71,7 @@ services:
 
     volumes:
       - ./databases/forum-db/data:/var/lib/postgresql/data
+      - ./sql-scripts/init-forum-db.sql:/docker-entrypoint-initdb.d/init-forum-db.sql
 
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U forum_user -d forum"]
