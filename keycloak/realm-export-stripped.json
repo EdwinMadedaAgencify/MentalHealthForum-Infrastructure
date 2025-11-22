@@ -1,0 +1,280 @@
+{
+  "id": "mentalhealthforum",
+  "realm": "mentalhealthforum",
+  "enabled": true,
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": false,
+  "editUsernameAllowed": false,
+  "rememberMe": true,
+  "loginWithEmailAllowed": true,
+  "verifyEmail": true,
+  "resetPasswordAllowed": true,
+  "sslRequired": "external",
+  "bruteForceProtected": true,
+  "maxFailureWaitSeconds": 900,
+  "minimumQuickLoginWaitSeconds": 60,
+  "failureFactor": 5,
+  "permanentLockout": false,
+  "quickLoginCheckMilliSeconds": 1000,
+  "passwordPolicy": "length(8) and digits(1) and upperCase(1) and lowerCase(1) and specialChars(1)",
+  "accessTokenLifespan": 1800,
+  "ssoSessionIdleTimeout": 18000,
+  "ssoSessionMaxLifespan": 2592000,
+  "offlineSessionIdleTimeout": 2592000,
+  "offlineSessionMaxLifespanEnabled": true,
+  "offlineSessionMaxLifespan": 5184000,
+  "revokeRefreshToken": true,
+  "requiredCredentials": ["password"],
+  "internationalizationEnabled": true,
+  "supportedLocales": ["en", "es", "fr", "de"],
+  "defaultLocale": "en",
+  "defaultRole": {
+    "name": "default-roles-mentalhealthforum"
+  },
+  "roles": {
+    "realm": [
+      {
+        "name": "moderator",
+        "description": "Content moderation capabilities"
+      },
+      {
+        "name": "forum_member",
+        "description": "Basic forum access"
+      },
+      {
+        "name": "peer_supporter",
+        "description": "Can provide peer support"
+      },
+      {
+        "name": "trusted_member",
+        "description": "Trusted community member with additional privileges"
+      },
+      {
+        "name": "admin",
+        "description": "Full administrative access"
+      }
+    ]
+  },
+  "groups": [
+    {
+      "name": "members",
+      "subGroups": [
+        {
+          "name": "new",
+          "realmRoles": ["forum_member"]
+        },
+        {
+          "name": "active",
+          "realmRoles": ["forum_member", "trusted_member"]
+        },
+        {
+          "name": "trusted",
+          "realmRoles": ["forum_member", "trusted_member", "peer_supporter"]
+        }
+      ]
+    },
+    {
+      "name": "moderators",
+      "subGroups": [
+        {
+          "name": "peer",
+          "realmRoles": ["forum_member", "moderator"]
+        },
+        {
+          "name": "professional",
+          "realmRoles": ["forum_member", "moderator", "peer_supporter"]
+        }
+      ]
+    },
+    {
+      "name": "administrators",
+      "realmRoles": ["admin"]
+    }
+  ],
+  "defaultGroups": ["/members/new"],
+  "users": [
+    {
+      "username": "service-account-mhf-backend",
+      "enabled": true,
+      "serviceAccountClientId": "mhf-backend",
+      "clientRoles": {
+        "realm-management": [
+          "view-users",
+          "manage-realm",
+          "query-users",
+          "manage-users"
+        ]
+      },
+      "groups": [
+        "/members/new"
+      ]
+    }
+  ],
+  "scopeMappings": [
+    {
+      "clientScope": "offline_access",
+      "roles": [
+        "offline_access"
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "mhf-frontend",
+      "name": "Mental Health Forum Web (SPA)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "redirectUris": [
+        "http://localhost:3000/*",
+        "http://localhost",
+        "https://oauth.pstmn.io/v1/callback"
+      ],
+      "webOrigins": [
+        "http://localhost:3000"
+      ]
+    },
+    {
+      "clientId": "mhf-backend",
+      "name": "MHF Spring Boot Backend (Confidential)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true,
+      "secret": "${MHF_BACKEND_SECRET}",
+      "redirectUris": [
+        "http://localhost:8080/*"
+      ],
+      "webOrigins": [
+        "http://localhost:8080"
+      ]
+    },
+    {
+      "clientId": "mhf-api",
+      "name": "MHF Protected API (Bearer-Only)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": true
+    }
+  ],
+  "defaultDefaultClientScopes": [
+    "web-origins",
+    "acr",
+    "profile",
+    "roles",
+    "basic",
+    "email",
+    "openid",
+    "groups"
+  ],
+  "defaultOptionalClientScopes": [
+    "offline_access",
+    "address",
+    "phone",
+    "microprofile-jwt",
+    "organization"
+  ],
+  "components": {
+    "org.keycloak.services.clientregistration.policy.ClientRegistrationPolicy": [
+      {
+        "name": "Max Clients Limit",
+        "providerId": "max-clients",
+        "subType": "anonymous",
+        "config": {
+          "max-clients": ["200"]
+        }
+      },
+      {
+        "name": "Trusted Hosts",
+        "providerId": "trusted-hosts",
+        "subType": "anonymous",
+        "config": {
+          "host-sending-registration-request-must-match": ["true"],
+          "client-uris-must-match": ["true"]
+        }
+      }
+    ]
+  },
+  "authenticatorConfig": [
+    {
+      "alias": "create unique user config",
+      "config": {
+        "require.password.update.after.registration": "false"
+      }
+    },
+    {
+      "alias": "review profile config",
+      "config": {
+        "update.profile.on.first.login": "missing"
+      }
+    }
+  ],
+  "requiredActions": [
+    {
+      "alias": "CONFIGURE_TOTP",
+      "enabled": true
+    },
+    {
+      "alias": "UPDATE_PASSWORD",
+      "enabled": true
+    },
+    {
+      "alias": "UPDATE_PROFILE",
+      "enabled": true
+    },
+    {
+      "alias": "VERIFY_EMAIL",
+      "enabled": true
+    },
+    {
+      "alias": "VERIFY_PROFILE",
+      "enabled": true
+    }
+  ],
+  "browserSecurityHeaders": {
+    "xContentTypeOptions": "nosniff",
+    "referrerPolicy": "no-referrer",
+    "xRobotsTag": "none",
+    "xFrameOptions": "SAMEORIGIN",
+    "contentSecurityPolicy": "frame-src 'self'; frame-ancestors 'self'; object-src 'none';",
+    "strictTransportSecurity": "max-age=31536000; includeSubDomains"
+  },
+  "loginTheme": "keycloak",
+  "accountTheme": "keycloak.v2",
+  "adminTheme": "keycloak.v2",
+  "emailTheme": "keycloak.v2",
+  "eventsEnabled": true,
+  "eventsExpiration": 1209600,
+  "eventsListeners": [
+    "event-logger",
+    "jboss-logging"
+  ],
+  "enabledEventTypes": [
+    "LOGOUT",
+    "REGISTER",
+    "LOGIN_ERROR",
+    "LOGIN",
+    "DELETE_ACCOUNT",
+    "RESET_PASSWORD",
+    "UPDATE_PROFILE"
+  ],
+  "adminEventsEnabled": false,
+  "browserFlow": "browser",
+  "registrationFlow": "registration",
+  "directGrantFlow": "direct grant",
+  "resetCredentialsFlow": "reset credentials",
+  "clientAuthenticationFlow": "clients",
+  "attributes": {
+    "userProfileEnabled": "true",
+    "frontendBaseUrl": "http://localhost:3000"
+  }
+}
