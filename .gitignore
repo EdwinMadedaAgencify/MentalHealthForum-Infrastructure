@@ -1,0 +1,106 @@
+# === OS / System Files ===
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Icon?
+Desktop.ini
+
+# === Logs / Temporary Files ===
+*.log
+*.tmpg
+*.bak
+*.old
+*.pid
+*.swp
+
+# === Environment Files ===
+.env
+.env.*
+!.env.example     # Keep sample env files for reference
+*.secret
+*.key
+*.pem
+*.crt
+
+# === IDE / Editor Config ===
+.idea/
+.vscode/
+*.iml
+
+# === Python (if applicable) ===
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+
+# === Node (if applicable) ===
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# === Git ===
+.git/
+.gitignore
+
+# === Docker ===
+# Ignore Docker build caches, volumes, and temporary mounts
+**/cache/
+**/tmp/
+**/data/
+**/volumes/
+*.pid
+
+# === Database Volumes (MongoDB & Redis) ===
+# MongoDB files
+**/*.wt
+**/WiredTiger*
+**/_mdb_catalog.wt
+**/mongod.lock
+**/storage.bson
+**/sizeStorer.wt
+**/diagnostic.data/
+**/journal/
+
+# Redis files
+**/*.rdb
+**/*.aof
+
+# Specific database directories
+/database/novu-mongo/
+/databases/mhf-novu-mongodb/
+/databases/mhf-novu-redis/
+/databases/forum-db/
+/databases/keycloak-db/
+
+# === Keycloak ===
+keycloak/data/
+keycloak/logs/
+keycloak/tmp/
+keycloak/themes/
+keycloak/providers/
+keycloak/standalone/
+keycloak/*.log
+keycloak/*-full.json    # Ignore full exports
+
+# Keep stripped realm export if it contains non-sensitive defaults
+!keycloak/realm-export-stripped.json
+
+# === Other Project-Specific Exclusions ===
+*.tar
+*.zip
+*.gz
+*.7z
+
+# === SQL Scripts Output ===
+sql-scripts/*.out
+sql-scripts/*.dump
+sql-scripts/*.sqlite
+sql-scripts/*.db
+
+# === Keep These Tracked ===
+!docker-compose.yml
+!README.md
