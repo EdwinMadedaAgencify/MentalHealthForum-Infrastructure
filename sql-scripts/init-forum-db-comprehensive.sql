@@ -520,6 +520,69 @@ CREATE INDEX idx_thread_creator
                       created_at DESC
         );
 
+
+-- ====================================================================
+-- THREAD MODERATION ENHANCEMENTS
+-- ====================================================================
+
+-- 1. Add missing THREAD_ARCHIVED to moderation_action_enum
+ALTER TYPE moderation_action_enum ADD VALUE IF NOT EXISTS 'THREAD_ARCHIVED';
+
+-- 2. Create thread_edit_history table
+CREATE TABLE IF NOT EXISTS thread_edit_history (
+                                                   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    thread_id UUID NOT NULL REFERENCES forum_threads(id) ON DELETE CASCADE,
+    previous_title VARCHAR(255),
+    previous_tags TEXT[],
+    previous_content_warning_type content_warning_enum,
+    previous_content_warning_custom_text VARCHAR(255),
+    edited_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    edited_by UUID REFERENCES app_users(keycloak_id),
+    edit_reason_type edit_reason_enum,
+    edit_reason_custom_text VARCHAR(255),
+    is_moderator_edit BOOLEAN DEFAULT FALSE NOT NULL
+    );
+
+-- 3. Add indexes for performance
+CREATE INDEX IF NOT EXISTS idx_thread_edit_history_thread ON thread_edit_history (thread_id, edited_at DESC);
+CREATE INDEX IF NOT EXISTS idx_thread_edit_history_editor ON thread_edit_history (edited_by);
+
+-- 4. Add lock tracking columns to forum_threads (if not already added)
+ALTER TABLE forum_threads
+    ADD COLUMN IF NOT EXISTS lock_reason TEXT,
+    ADD COLUMN IF NOT EXISTS locked_by UUID REFERENCES app_users(keycloak_id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS locked_at TIMESTAMP;
+
+-- 5. Add comments for documentation
+COMMENT ON TABLE thread_edit_history IS 'Tracks all edits made to threads (title, tags, content warnings)';
+COMMENT ON COLUMN thread_edit_history.previous_title IS 'Title before edit';
+COMMENT ON COLUMN thread_edit_history.previous_tags IS 'Tags before edit';
+COMMENT ON COLUMN thread_edit_history.previous_content_warning_type IS 'Content warning type before edit';
+COMMENT ON COLUMN thread_edit_history.is_moderator_edit IS 'True if edit was performed by a moderator';
+COMMENT ON COLUMN forum_threads.lock_reason IS 'Reason provided by moderator when locking the thread';
+COMMENT ON COLUMN forum_threads.locked_by IS 'Moderator who locked the thread';
+COMMENT ON COLUMN forum_threads.locked_at IS 'Timestamp when thread was locked';
+
+
+-- Add new value
+ALTER TYPE moderation_action_enum ADD VALUE IF NOT EXISTS 'THREAD_SOFT_DELETED';
+
+-- Update any existing rows that used THREAD_DELETED
+UPDATE content_reports
+SET action_taken = 'THREAD_SOFT_DELETED'
+WHERE action_taken = 'THREAD_DELETED';
+
+-- Keep THREAD_DELETED in enum but don't use it in new code
+-- Or remove it (requires recreating enum type - complex)
+-- Add THREAD_UNARCHIVED if needed
+ALTER TYPE moderation_action_enum ADD VALUE IF NOT EXISTS 'THREAD_UNARCHIVED';
+
+
+ALTER TYPE moderation_action_enum ADD VALUE IF NOT EXISTS 'VIEW_DELETED_THREADS';
+
+-- No need to rename THREAD_DELETED - keep as is
+
+
 -- Note:
 -- Trigger for updating last_activity_at will be created AFTER forum_posts exists
 -- (because forum_posts does not exist yet at this point)
@@ -805,6 +868,17 @@ ALTER TABLE forum_threads
             REFERENCES forum_posts(id, thread_id)
             ON DELETE SET NULL;
 
+-- Add content warning tracking to post_edit_history
+ALTER TABLE post_edit_history
+    ADD COLUMN IF NOT EXISTS previous_content_warning_type content_warning_enum,
+    ADD COLUMN IF NOT EXISTS previous_content_warning_custom_text VARCHAR(255);
+
+COMMENT ON COLUMN post_edit_history.previous_content_warning_type IS 'Content warning type before edit';
+COMMENT ON COLUMN post_edit_history.previous_content_warning_custom_text IS 'Custom warning text before edit';
+
+
+-- Add VIEW_DELETED_POSTS to moderation_action_enum
+ALTER TYPE moderation_action_enum ADD VALUE IF NOT EXISTS 'VIEW_DELETED_POSTS';
 
 
 -- ============================================================================================================================
@@ -1182,11 +1256,6 @@ CREATE TRIGGER trigger_flag_content_on_report
     EXECUTE FUNCTION flag_content_on_report();
 
 
-
-
-
-
-
 -- ====================================================================
 -- COMPLETE CONTENT REPORTS ENHANCEMENT
 -- Enums, template tables, and content_reports schema updates
@@ -1326,15 +1395,38 @@ ALTER TABLE report_templates
 -- ====================================================================
 
 -- 3.1 Change action_taken from TEXT to moderation_action_enum
+UPDATE content_reports
+SET action_taken = 'REPORT_ACTIONED'
+WHERE action_taken IS NULL AND status = 'ACTION_TAKEN';
+
+UPDATE content_reports
+SET action_taken = 'REPORT_DISMISSED'
+WHERE action_taken IS NULL AND status = 'DISMISSED';
+
+UPDATE content_reports
+SET action_taken = 'REPORT_ASSIGNED'
+WHERE action_taken IS NULL AND status = 'UNDER_REVIEW';
+
+UPDATE content_reports
+SET action_taken = 'REPORT_ACTIONED'
+WHERE action_taken IS NULL;
+-- 3.1a Handle NULL action_taken values before type conversion
+
 ALTER TABLE content_reports
 ALTER COLUMN action_taken TYPE moderation_action_enum
         USING action_taken::moderation_action_enum;
+
 
 -- 3.2 Make action_taken NOT NULL
 ALTER TABLE content_reports
     ALTER COLUMN action_taken SET NOT NULL;
 
 -- 3.3 Make action_taken_details NOT NULL
+UPDATE content_reports
+SET action_taken_details = 'Initial report created'
+WHERE action_taken_details IS NULL;
+-- 3.3a  Handle NULL action_taken_details
+
 ALTER TABLE content_reports
     ALTER COLUMN action_taken_details SET NOT NULL;
 
@@ -1343,6 +1435,11 @@ ALTER TABLE content_reports
     ADD COLUMN IF NOT EXISTS dismissal_reason dismissal_reason_enum;
 
 -- 3.5 Add check constraint: dismissal_reason required when status = 'DISMISSED'
+UPDATE content_reports
+SET dismissal_reason = 'NO_VIOLATION'
+WHERE status = 'DISMISSED' AND dismissal_reason IS NULL;
+-- 3.5a Set default dismissal_reason for existing dismissed reports
+
 ALTER TABLE content_reports
     ADD CONSTRAINT chk_dismissal_reason_required
         CHECK (
@@ -1352,6 +1449,13 @@ ALTER TABLE content_reports
 
 -- 3.6 Drop existing unique constraint (to be replaced with partial indexes)
 ALTER TABLE content_reports DROP CONSTRAINT IF EXISTS uq_user_report;
+
+-- 3.6a  Drop NOT NULL constraints if they exist
+ALTER TABLE content_reports
+    ALTER COLUMN action_taken DROP NOT NULL;
+
+ALTER TABLE content_reports
+    ALTER COLUMN action_taken_details DROP NOT NULL;
 
 -- 3.7 Create partial unique indexes for active reports
 CREATE UNIQUE INDEX IF NOT EXISTS uq_user_active_thread_report
@@ -1515,9 +1619,95 @@ COMMENT ON COLUMN dismissal_reason_templates.default_message IS 'Default message
 
 
 
+-- Add REPORT_DETAILS_UPDATED to moderation_action_enum
+ALTER TYPE moderation_action_enum ADD VALUE IF NOT EXISTS 'REPORT_DETAILS_UPDATED';
+
+INSERT INTO moderation_action_templates (action_type, default_message, description, example_message, display_order) VALUES
+    ('REPORT_DETAILS_UPDATED',
+     'Report details have been updated by a moderator.',
+     'Moderator updated report metadata (severity, notes, action details)',
+     'Severity changed from HIGH to CRITICAL after review',
+     26  -- After REPORT_ESCALATED which is 25
+    );
+
+
+-- Check what values exist in moderation_action_enum
+SELECT unnest(enum_range(NULL::moderation_action_enum)) as value;
+
+-- Check what values exist in edit_reason_enum
+SELECT unnest(enum_range(NULL::edit_reason_enum)) as value;
+
+
+ALTER TYPE moderation_action_enum ADD VALUE IF NOT EXISTS 'POST_PERMANENTLY_DELETED';
+
+ALTER TYPE edit_reason_enum ADD VALUE IF NOT EXISTS 'CONTENT_WARNING_ADDED';
+
+ALTER TABLE post_edit_history
+    ADD COLUMN IF NOT EXISTS is_moderator_edit BOOLEAN DEFAULT FALSE;
+
+
+
+-- Add missing values to moderation_action_enum
+ALTER TYPE moderation_action_enum ADD VALUE IF NOT EXISTS 'THREAD_TYPE_CHANGED';
+ALTER TYPE moderation_action_enum ADD VALUE IF NOT EXISTS 'THREAD_STICKY_TOGGLED';
+ALTER TYPE moderation_action_enum ADD VALUE IF NOT EXISTS 'THREAD_RESTORED';
+ALTER TYPE moderation_action_enum ADD VALUE IF NOT EXISTS 'BEST_ANSWER_SET';
+ALTER TYPE moderation_action_enum ADD VALUE IF NOT EXISTS 'BEST_ANSWER_CLEARED';
+ALTER TYPE moderation_action_enum ADD VALUE IF NOT EXISTS 'THREAD_PERMANENTLY_DELETED';
+ALTER TYPE moderation_action_enum ADD VALUE IF NOT EXISTS 'THREAD_METADATA_EDITED';
+ALTER TYPE moderation_action_enum ADD VALUE IF NOT EXISTS 'THREAD_CONTENT_WARNING_ADDED';
+
+
+-- ====================================================================
+-- UNIFIED MODERATION QUEUE
+-- Handles flags from moderators and AI across all content types
+-- ====================================================================
+
+-- Reuse existing enums where possible
+-- target_type_enum already exists from content_reports
+
+CREATE TYPE queue_source_enum AS ENUM (
+    'MODERATOR',
+    'AI',
+    'SYSTEM'
+    );
+
+CREATE TABLE moderation_queue (
+                                  id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- Source
+                                  source                  queue_source_enum NOT NULL,
+                                  flagged_by              UUID REFERENCES app_users(keycloak_id) ON DELETE SET NULL,
+                                  flagged_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+
+    -- Target (reusing existing enum)
+                                  target_type             report_target_type_enum NOT NULL,
+                                  target_id               UUID NOT NULL,
+
+    -- Flag details
+                                  reason                  TEXT NOT NULL,
+                                  ai_confidence_score     DECIMAL(3,2),
+
+    -- Simple lifecycle (NULL = active flag)
+                                  cleared_at              TIMESTAMP,
+
+                                  created_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+-- Index for active flags
+CREATE INDEX idx_queue_active ON moderation_queue (cleared_at) WHERE cleared_at IS NULL;
+
+-- Index for target lookups
+CREATE INDEX idx_queue_target ON moderation_queue (target_type, target_id);
+
+
+
+
+
 -- ============================================================================================================================
 --                                      MODERATION - ENHANCED ACTIONS & WORKFLOWS
 -- ============================================================================================================================
+
 -- Metadata examples
 -- {"from_category": "uuid1", "to_category": "uuid2"} // For THREAD_MOVED
 -- {"old_reputation": 50, "new_reputation": 75, "adjustment": +25} // For USER_REPUTATION_ADJUSTED
@@ -1766,6 +1956,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 
+
 -- ============================================================================================================================
 --                                        ROLE CAPABILITIES
 -- ============================================================================================================================
@@ -1920,6 +2111,9 @@ WHERE fp.is_deleted = FALSE
   AND ft.is_deleted = FALSE
   AND fp.author_id IS NOT NULL
 GROUP BY fp.author_id, ft.category_id, fc.name;
+
+
+SELECT id, tag_name, tag_description FROM category_tags;
 
 
 -- ============================================================================================================================
