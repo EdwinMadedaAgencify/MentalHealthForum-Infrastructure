@@ -521,6 +521,9 @@ CREATE INDEX idx_thread_creator
         );
 
 
+
+
+
 -- ====================================================================
 -- THREAD MODERATION ENHANCEMENTS
 -- ====================================================================
@@ -587,11 +590,17 @@ ALTER TYPE moderation_action_enum ADD VALUE IF NOT EXISTS 'VIEW_DELETED_THREADS'
 -- Trigger for updating last_activity_at will be created AFTER forum_posts exists
 -- (because forum_posts does not exist yet at this point)
 
--- ============================================================================================================================
---                                        POSTS - RICHER CONTENT & SAFETY
--- ============================================================================================================================
+-- Add lock expiration to forum_threads
+ALTER TABLE forum_threads
+    ADD COLUMN IF NOT EXISTS lock_expires_at TIMESTAMP;
 
--- Supporting ENUM Types
+COMMENT ON COLUMN forum_threads.lock_expires_at IS 'When the lock expires (null = permanent lock)';
+
+    -- ============================================================================================================================
+    --                                        POSTS - RICHER CONTENT & SAFETY
+    -- ============================================================================================================================
+
+    -- Supporting ENUM Types
 CREATE TYPE post_type_enum AS ENUM (
         'REPLY',            -- Standard user response
         'ANSWER',           -- Answer to a QUESTION thread (potential best answer)
@@ -2010,6 +2019,125 @@ INSERT INTO group_configurations (group_path) VALUES
                                                   ('moderators/professional'),
                                                   ('administrators');
 
+--====================================================================
+-- DISCOVERY & SUPPORT GRAPH - Complete Schema
+-- ====================================================================
+DROP TABLE IF EXISTS user_connections CASCADE;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'connection_status_enum') THEN
+CREATE TYPE connection_status_enum AS ENUM ('PENDING', 'ACCEPTED', 'DISMISSED');
+END IF;
+END $$;
+
+-- 1. Thread Bookmarks (Private Utility)
+CREATE TABLE IF NOT EXISTS thread_bookmarks (
+                                                id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         UUID NOT NULL REFERENCES app_users(keycloak_id) ON DELETE CASCADE,
+    thread_id       UUID NOT NULL REFERENCES forum_threads(id) ON DELETE CASCADE,
+    notes           TEXT,
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    UNIQUE(user_id, thread_id)
+    );
+
+-- 2. User Connections (Mutual Handshake)
+CREATE TABLE IF NOT EXISTS user_connections (
+                                                id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_1                UUID NOT NULL REFERENCES app_users(keycloak_id) ON DELETE CASCADE,
+    user_2                UUID NOT NULL REFERENCES app_users(keycloak_id) ON DELETE CASCADE,
+    initiated_by          UUID NOT NULL REFERENCES app_users(keycloak_id) ON DELETE CASCADE,
+    status                connection_status_enum NOT NULL DEFAULT 'PENDING'::connection_status_enum,
+    notification_enabled  BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at            TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at            TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    -- Constraints
+    CONSTRAINT chk_no_self_connection CHECK (user_1 <> user_2),
+    CONSTRAINT chk_ordered_uuids CHECK (user_1 < user_2),
+    CONSTRAINT chk_initiated_by_is_one_of_users CHECK (initiated_by = user_1 OR initiated_by = user_2),
+    UNIQUE(user_1, user_2)
+    );
+
+-- 3. Focused Categories (Personal Dashboard Curation)
+CREATE TABLE IF NOT EXISTS focused_categories (
+                                                  id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id                 UUID NOT NULL REFERENCES app_users(keycloak_id) ON DELETE CASCADE,
+    category_id             UUID NOT NULL REFERENCES forum_categories(id) ON DELETE CASCADE,
+    notification_enabled    BOOLEAN DEFAULT FALSE NOT NULL,
+    created_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    UNIQUE(user_id, category_id)
+    );
+
+-- 4. Thread Watches (Temporary Notification Monitors)
+CREATE TABLE IF NOT EXISTS thread_watches (
+                                              id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id                 UUID NOT NULL REFERENCES app_users(keycloak_id) ON DELETE CASCADE,
+    thread_id               UUID NOT NULL REFERENCES forum_threads(id) ON DELETE CASCADE,
+    notification_enabled    BOOLEAN DEFAULT FALSE NOT NULL,
+    created_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    UNIQUE(user_id, thread_id)
+    );
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_bookmarks_user ON thread_bookmarks(user_id, created_at DESC);
+
+
+-- Index for incoming pending requests (someone requested me)
+CREATE INDEX IF NOT EXISTS idx_pending_incoming ON user_connections(user_1, user_2)
+    WHERE status = 'PENDING'::connection_status_enum;
+
+-- Index for active connections lookup
+CREATE INDEX IF NOT EXISTS idx_connections_active
+    ON user_connections(user_1, user_2)
+    WHERE status = 'ACCEPTED'::connection_status_enum;
+
+-- Index for finding outgoing requests (by initiated_by)
+CREATE INDEX IF NOT EXISTS idx_connections_initiated
+    ON user_connections(initiated_by)
+    WHERE status = 'PENDING'::connection_status_enum;
+
+-- Index for finding all connections involving a user (for queries)
+CREATE INDEX IF NOT EXISTS idx_user_connections_lookup
+    ON user_connections(user_1, user_2);
+
+-- Index for updated_at (useful for cleanup jobs)
+CREATE INDEX IF NOT EXISTS idx_connections_updated
+    ON user_connections(updated_at);
+
+
+CREATE INDEX IF NOT EXISTS idx_focused_user ON focused_categories(user_id);
+CREATE INDEX IF NOT EXISTS idx_watches_user ON thread_watches(user_id);
+
+
+-- Create function to auto-update updated_at
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+    RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- Create trigger
+CREATE TRIGGER update_user_connections_updated_at
+    BEFORE UPDATE ON user_connections
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+
+-- Just drop the problematic constraint
+ALTER TABLE user_connections DROP CONSTRAINT IF EXISTS chk_ordered_uuids;
+
+ALTER TYPE connection_status_enum RENAME VALUE 'DISMISSED' TO 'DECLINED';
+
+-- Check indexes
+SELECT indexname, indexdef
+FROM pg_indexes
+WHERE tablename = 'user_connections';
+
+
+
 -- ============================================================================================================================
 --                                                      DISCOVERY
 -- ============================================================================================================================
@@ -2113,7 +2241,7 @@ WHERE fp.is_deleted = FALSE
 GROUP BY fp.author_id, ft.category_id, fc.name;
 
 
-SELECT id, tag_name, tag_description FROM category_tags;
+
 
 
 -- ============================================================================================================================
